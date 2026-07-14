@@ -5,8 +5,7 @@
     
 """
 
-import os
-from distutils.core import setup
+from setuptools import setup
 
 version = '0.1.0'
 
@@ -24,5 +23,6 @@ setup(name = 'rpmcli',
                    "Topic :: Office/Business"],
       keywords="RPM Remote Print Manager Command Line Interface CLI",
       packages=PACKAGES,
-      install_requires=['json','socket','sys']
+      python_requires='>=3.8',
+      install_requires=[]
 )
