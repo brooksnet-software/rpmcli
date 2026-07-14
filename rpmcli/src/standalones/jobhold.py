@@ -13,7 +13,7 @@ if __name__ == '__main__':
   # Connect using the configured CLI Key.
   r = RPM(key = clikey)
   # Wait for connection to establish.
-  while not r.connected:
+  while not r.ready:
     sleep(1)
   # Parse command line options.
   A = ArgParse(description = "A Utility to Hold or Release jobs in RPM Queues.")

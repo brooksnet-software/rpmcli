@@ -180,7 +180,7 @@ class RPM(object):
       return t.start()
     while True:
       try:
-        self.conn = RPCConnection()
+        self.conn = RPCConnection(self.host, self.port)
         self.auth(self.key)
         return self.loadcmds()
       except:
