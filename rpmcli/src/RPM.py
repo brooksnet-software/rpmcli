@@ -199,8 +199,8 @@ class RPM(object):
         authorized = self.app_key()
         if authorized['success']:
           return authorized
-        print authorized['message']
-        store[mykeystr] = self.rpckey = raw_input('Please enter your RPC Key: ')
+        print(authorized['message'])
+        store[mykeystr] = self.rpckey = input('Please enter your RPC Key: ')
 
   def _gen(self, cmd):
     def func(self):
@@ -289,7 +289,7 @@ class RPM(object):
 #       if 'success' in data:
 #         self.responses.append(data)
       if not isinstance(data, dict):
-        print "Errant JSON String -", data
+        print("Errant JSON String -", data)
         continue
       if 'callback' in data:
 #         self.events.append(data)
@@ -310,7 +310,7 @@ class RPM(object):
         continue
       break
     else:
-      print "Unable to successfully call %s" % handler.__name__
+      print("Unable to successfully call %s" % handler.__name__)
 
   def app_key(self):
     return self.command('app-key', key = self.rpckey)

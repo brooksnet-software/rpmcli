@@ -30,6 +30,6 @@ class JobTracker(object):
     self.r.register(callback, self.handler)
 
   def prune(self):
-    for jid in self.jobs.keys():
+    for jid in list(self.jobs.keys()):
       if not self.events - self.jobs[jid]:
         self.jobs.pop(jid)

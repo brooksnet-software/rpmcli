@@ -17,12 +17,12 @@ into other projects.
   -- Examples Of Interactive Use --
   
 c:\path\to\python.exe RPM.py
->>> print r
+>>> print(r)
 <__main__.RPM object at 0x02365410>
->>> print r.queue_list()
-{u'queues': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 769, 770, 796], u'command': u'queue-list', u'success': True}
->>> print r.queue_jobs(qid = 770)
-{u'command': u'queue-jobs', u'jobs': [175, 176, 177, 178, 179, 180, 181, 182], u'success': True}
+>>> print(r.queue_list())
+{'queues': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 769, 770, 796], 'command': 'queue-list', 'success': True}
+>>> print(r.queue_jobs(qid = 770))
+{'command': 'queue-jobs', 'jobs': [175, 176, 177, 178, 179, 180, 181, 182], 'success': True}
 >>> help(r.queue_jobs)
 Help on method queue_jobs in module __main__:
 
