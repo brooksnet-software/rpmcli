@@ -1,0 +1,12 @@
+# Normalize all text files to LF in the repository, regardless of editor/OS.
+* text=auto eol=lf
+*.py text eol=lf
+
+# Treat these as binary (never normalize or diff as text).
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.exe binary
+*.dll binary
+*.pyc binary
