@@ -33,3 +33,12 @@ nosetests.xml
 .mr.developer.cfg
 .project
 .pydevproject
+
+# PyInstaller build output (see standalones/servicesamples build_pyinstaller.py)
+*.spec
+standalones_*/
+dist_*/
+
+# RPC key store written at runtime by RPM.auth (shelve)
+constants
+constants.*
