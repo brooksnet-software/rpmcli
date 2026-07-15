@@ -12,6 +12,7 @@ set_property(CACHE RPM_JSON_BACKEND PROPERTY STRINGS nlohmann boost)
 add_library(rpm STATIC
   src/RPCConnection.cpp
   src/RPM.cpp
+  src/JobTracker.cpp
 )
 target_include_directories(rpm PUBLIC include)
 
@@ -60,3 +61,7 @@ endforeach()
 # ---- read-only smoke test --------------------------------------------------
 add_executable(smoketest tests/smoketest.cpp)
 target_link_libraries(smoketest PRIVATE rpm)
+
+# ---- callback / JobTracker test (in-process mock server) -------------------
+add_executable(callbacktest tests/callbacktest.cpp)
+target_link_libraries(callbacktest PRIVATE rpm)

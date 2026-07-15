@@ -1,9 +1,23 @@
 #include "rpm/RPM.hpp"
 
+#include <chrono>
+#include <iostream>
+#include <vector>
+
 namespace rpm {
 
 RPM::RPM(std::string host, unsigned short port)
-    : conn_(std::move(host), port, /*autoConnect=*/false) {}
+    : conn_(host, port, /*autoConnect=*/false),
+      host_(std::move(host)),
+      port_(port) {}
+
+RPM::~RPM() {
+  // Stop the receiver thread: flag it, then close the conduit so a blocked
+  // recv() returns, then join.
+  receiverStop_ = true;
+  if (conduit_) conduit_->disconnect();
+  if (receiver_.joinable()) receiver_.join();
+}
 
 ConnectResult RPM::connect(const std::string& key) {
   key_ = key;
@@ -77,6 +91,105 @@ Json RPM::jobHold(long long jid, const std::string& hold) {
 
 Json RPM::queueModify(const std::map<std::string, Json>& kwargs) {
   return call("queue-modify", kwargs);
+}
+
+// ----------------------------------------------------------------------------
+// Asynchronous event callbacks (Python's register/unregister/receiver).
+// ----------------------------------------------------------------------------
+void RPM::setCloseHandler(std::function<void()> fn) {
+  std::lock_guard<std::mutex> lock(cbMutex_);
+  closeHandler_ = std::move(fn);
+}
+
+RPM::HandlerId RPM::registerCallback(const std::string& callback,
+                                     EventHandler handler) {
+  std::lock_guard<std::mutex> lock(cbMutex_);
+
+  // First registration: open the conduit, authorize it, start the receiver.
+  // The app-key exchange completes before the receiver thread starts so the
+  // two never read from the conduit concurrently.
+  if (!conduit_) {
+    conduit_.reset(new RPCConnection(host_, port_));
+    Json auth = Json::object();
+    auth.set("command", "app-key");
+    auth.set("key", key_);
+    conduit_->comm(auth);
+    receiverStop_ = false;
+    receiver_ = std::thread(&RPM::receiverLoop, this);
+  }
+
+  // Only send callback-add the first time a callback name is registered; RPM
+  // reports an error if the same callback is added twice.
+  auto& handlers = callbacks_[callback];
+  const bool firstForName = handlers.empty();
+  const HandlerId id = nextHandlerId_++;
+  handlers[id] = std::move(handler);
+
+  if (firstForName) {
+    Json add = Json::object();
+    add.set("command", "callback-add");
+    add.set("callback", callback);
+    conduit_->send(add);
+  }
+  return id;
+}
+
+void RPM::unregisterCallback(const std::string& callback, HandlerId id) {
+  std::lock_guard<std::mutex> lock(cbMutex_);
+  auto it = callbacks_.find(callback);
+  if (it == callbacks_.end()) return;
+  it->second.erase(id);
+  // Keep the subscription while other handlers still listen for this event.
+  if (!it->second.empty()) return;
+  callbacks_.erase(it);
+  if (conduit_) {
+    Json rm = Json::object();
+    rm.set("command", "callback-remove");
+    rm.set("callback", callback);
+    conduit_->send(rm);
+  }
+}
+
+void RPM::receiverLoop() {
+  for (;;) {
+    Json data;
+    try {
+      data = conduit_->recv();
+    } catch (const ConnectionClosed&) {
+      if (!receiverStop_ && closeHandler_) closeHandler_();
+      break;
+    } catch (const SocketError&) {
+      break;  // conduit closed (typically during shutdown)
+    }
+    if (receiverStop_) break;
+    if (!data.isObject() || !data.contains("callback")) continue;
+
+    const std::string callback = data.at("callback").asString();
+    // Copy the current handlers under the lock, then dispatch outside it so a
+    // handler that calls back into RPM cannot deadlock.
+    std::vector<EventHandler> handlers;
+    {
+      std::lock_guard<std::mutex> lock(cbMutex_);
+      auto it = callbacks_.find(callback);
+      if (it != callbacks_.end())
+        for (const auto& kv : it->second) handlers.push_back(kv.second);
+    }
+    for (const auto& h : handlers) safecall(h, data, callback);
+  }
+}
+
+void RPM::safecall(const EventHandler& handler, const Json& data,
+                   const std::string& name) {
+  // Allow "unreliable" handlers: retry a few times before giving up.
+  for (int attempt = 0; attempt < 5; ++attempt) {
+    try {
+      handler(data);
+      return;
+    } catch (...) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+  }
+  std::cerr << "Unable to successfully call handler for " << name << "\n";
 }
 
 // ----------------------------------------------------------------------------

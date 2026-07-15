@@ -7,10 +7,10 @@ version in the parent directory.
 ## Layout
 
 ```
-include/rpm/   Json.hpp, RPCConnection.hpp, RPM.hpp   (public headers)
-src/           RPCConnection.cpp, RPM.cpp             (implementation)
+include/rpm/   Json.hpp, RPCConnection.hpp, RPM.hpp, JobTracker.hpp  (public headers)
+src/           RPCConnection.cpp, RPM.cpp, JobTracker.cpp            (implementation)
 tools/         jobadd, jobhold, queuesuspend, resetsequence
-tests/         smoketest (read-only end-to-end check)
+tests/         smoketest (read-only live check), callbacktest (mock-server)
 third_party/   nlohmann/json.hpp (vendored)
 ```
 
@@ -58,9 +58,18 @@ against a live server:
 ./build/Release/smoketest.exe <your-rpc-key>
 ```
 
+## Asynchronous callbacks
+
+`RPM::registerCallback(name, handler)` subscribes to an RPM event (e.g.
+`"job.add"`). The first registration opens a second "conduit" connection and
+starts a background receiver thread that dispatches events to the registered
+handlers. Because `std::function` is not comparable, handlers are identified by
+the id returned from `registerCallback` (rather than by function identity as in
+Python); pass it to `unregisterCallback`. `JobTracker` builds on this to track
+which events each job has received, dropping jobs once they have seen every
+tracked event.
+
 ## Scope
 
-This port covers the client library (`RPCConnection`, `RPM`) and the four
-standalone utilities. The asynchronous callback/event machinery (Python's
-`register`/`receiver` and `JobTracker`) is not ported yet; it would build on
-the same `RPCConnection` with a background receive thread.
+This port covers the full client library (`RPCConnection`, `RPM`, the async
+callback machinery and `JobTracker`) and the four standalone utilities.
