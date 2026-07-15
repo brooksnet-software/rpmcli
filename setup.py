@@ -9,7 +9,7 @@ from setuptools import setup
 
 version = '0.1.0'
 
-PACKAGES = ['rpmcli', 'rpmcli.src', 'rpmcli.src.backend']
+PACKAGES = ['rpmcli', 'rpmcli.backend', 'rpmcli.standalones', 'rpmcli.servicesamples']
             
 
 setup(name = 'rpmcli',

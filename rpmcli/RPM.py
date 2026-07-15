@@ -13,7 +13,7 @@ import shelve
 from threading import Thread, Lock
 from time import sleep
 
-from backend.RPCConnection import RPCConnection
+from rpmcli.backend.RPCConnection import RPCConnection
 
 
 class RPM(object):

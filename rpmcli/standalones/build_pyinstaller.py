@@ -22,7 +22,7 @@ from glob import glob
 from platform import architecture
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SRC = os.path.dirname(HERE)  # rpmcli/src -- so `import RPM` / `backend` resolve
+ROOT = os.path.dirname(os.path.dirname(HERE))  # parent of rpmcli/ -- so `import rpmcli` resolves
 DIST = os.path.join(HERE, '..', 'standalones_%s' % architecture()[0])
 WORK = os.path.join(HERE, 'build')
 
@@ -47,7 +47,7 @@ def build(script):
         '--distpath', DIST,
         '--workpath', WORK,
         '--specpath', WORK,
-        '--paths', SRC,               # resolve `import RPM`, `backend`, `standalones`
+        '--paths', ROOT,              # resolve `import rpmcli...`
         '--exclude-module', 'tkinter',
     ])
 

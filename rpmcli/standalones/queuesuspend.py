@@ -3,7 +3,7 @@
 from argparse import ArgumentParser as ArgParse
 import sys
 
-from standalones import connect
+from rpmcli.standalones import connect
 
 
 if __name__ == '__main__':

@@ -4,8 +4,8 @@
 import sys
 from time import sleep
 
-from RPM import RPM
-from backend.RPCConnection import RPCConnection
+from rpmcli.RPM import RPM
+from rpmcli.backend.RPCConnection import RPCConnection
 
 # RPC key these utilities present to the RPM server.  It must be registered as
 # an authorized key on the RPM server before the utilities will work; connect()
