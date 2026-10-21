@@ -5,18 +5,21 @@
 #include "common.hpp"
 
 int main(int argc, char** argv) {
-  if (argc != 3) {
-    std::cerr << "usage: queuesuspend <queue> <true|false|toggle>\n";
+  rpmtools::Connection conn;
+  const auto args = rpmtools::parseArgs(argc, argv, conn);
+  if (args.size() != 2) {
+    std::cerr << "usage: queuesuspend [connection options] <queue> <true|false|toggle>\n"
+              << rpmtools::connectionUsage();
     return 2;
   }
-  const std::string queue = argv[1];
-  const std::string state = argv[2];
+  const std::string queue = args[0];
+  const std::string state = args[1];
   if (state != "true" && state != "false" && state != "toggle") {
     std::cout << "Invalid Suspend State\n";
     return 1;
   }
 
-  auto r = rpmtools::connectOrExit();
+  auto r = rpmtools::connectOrExit("rpmcli queuesuspend", conn);
   const auto queues = rpmtools::queueLookup(r->queueListNames());
   auto it = queues.find(queue);
   if (it == queues.end()) {

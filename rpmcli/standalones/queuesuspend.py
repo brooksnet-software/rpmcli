@@ -3,17 +3,18 @@
 from argparse import ArgumentParser as ArgParse
 import sys
 
-from rpmcli.standalones import connect
+from rpmcli.standalones import add_connection_options, connect
 
 
 if __name__ == '__main__':
-  # Connect and validate the configured RPC key.
-  r = connect()
   # Parse command line options.
   A = ArgParse(description = "A Utility to Suspend / Resume RPM Queues.")
   A.add_argument("queue", help = "Queue name to control.")
   A.add_argument("state", help = "State - One of (true, false, toggle).")
+  add_connection_options(A)
   options = A.parse_args()
+  # Connect and check the RPC key.
+  r = connect(options)
   if options.state not in ('true', 'false', 'toggle'):
     print("Invalid Suspend State")
     sys.exit(1)

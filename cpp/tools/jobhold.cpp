@@ -5,26 +5,29 @@
 #include "common.hpp"
 
 int main(int argc, char** argv) {
-  if (argc != 3) {
-    std::cerr << "usage: jobhold <jobid> <true|false|toggle>\n";
+  rpmtools::Connection conn;
+  const auto args = rpmtools::parseArgs(argc, argv, conn);
+  if (args.size() != 2) {
+    std::cerr << "usage: jobhold [connection options] <jobid> <true|false|toggle>\n"
+              << rpmtools::connectionUsage();
     return 2;
   }
   long long jobid = 0;
   try {
     size_t used = 0;
-    jobid = std::stoll(argv[1], &used);
-    if (used != std::string(argv[1]).size()) throw std::invalid_argument("");
+    jobid = std::stoll(args[0], &used);
+    if (used != args[0].size()) throw std::invalid_argument("");
   } catch (const std::exception&) {
     std::cerr << "jobid must be an integer.\n";
     return 2;
   }
-  const std::string hold = argv[2];
+  const std::string hold = args[1];
   if (hold != "true" && hold != "false" && hold != "toggle") {
     std::cout << "Invalid Hold Option.\n";
     return 1;
   }
 
-  auto r = rpmtools::connectOrExit();
+  auto r = rpmtools::connectOrExit("rpmcli jobhold", conn);
   std::cout << r->jobHold(jobid, hold).dump() << "\n";
   return 0;
 }

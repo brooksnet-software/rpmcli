@@ -21,8 +21,14 @@ RPM::~RPM() {
 
 ConnectResult RPM::connect(const std::string& key) {
   key_ = key;
+  conn_.setFingerprint(fingerprint_);
   try {
     conn_.connect();
+  } catch (const CertificateMismatch& e) {
+    ConnectResult r{ConnectStatus::CertificateRejected, e.what()};
+    r.presented = e.presented;
+    r.configured = e.configured;
+    return r;
   } catch (const SocketError& e) {
     return {ConnectStatus::Unreachable, e.what()};
   }
@@ -40,6 +46,7 @@ ConnectResult RPM::connect(const std::string& key) {
 Json RPM::appKey(const std::string& key) {
   Json params = Json::object();
   params.set("key", key);
+  params.set("client", client_);
   return command("app-key", params);
 }
 
@@ -109,10 +116,13 @@ RPM::HandlerId RPM::registerCallback(const std::string& callback,
   // The app-key exchange completes before the receiver thread starts so the
   // two never read from the conduit concurrently.
   if (!conduit_) {
-    conduit_.reset(new RPCConnection(host_, port_));
+    conduit_.reset(new RPCConnection(host_, port_, /*autoConnect=*/false));
+    conduit_->setFingerprint(fingerprint_);
+    conduit_->connect();
     Json auth = Json::object();
     auth.set("command", "app-key");
     auth.set("key", key_);
+    auth.set("client", client_);
     conduit_->comm(auth);
     receiverStop_ = false;
     receiver_ = std::thread(&RPM::receiverLoop, this);

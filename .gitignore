@@ -40,6 +40,7 @@ nosetests.xml
 standalones_*/
 dist_*/
 
-# RPC key store written at runtime by RPM.auth (shelve)
+# RPC key store older versions of RPM.auth wrote here (shelve); keys now go
+# in %APPDATA%\rpmcli\rpmcli.ini (see rpmcli/settings.py)
 constants
 constants.*

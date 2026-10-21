@@ -2,9 +2,15 @@
 // Manager server, over a raw TCP socket (Winsock on Windows).
 //
 // This is the C++ counterpart of the Python backend.RPCConnection class.
+//
+// RPM 7 accepts connections from other computers only over TLS (Schannel). The
+// server's certificate is checked against the fingerprint set with
+// setFingerprint() before anything is sent; a server on this computer is
+// reached without TLS unless a fingerprint is set.
 #ifndef RPM_RPCCONNECTION_HPP
 #define RPM_RPCCONNECTION_HPP
 
+#include <memory>
 #include <string>
 #include <stdexcept>
 
@@ -23,6 +29,16 @@ struct SocketError : std::runtime_error {
   explicit SocketError(const std::string& what) : std::runtime_error(what) {}
 };
 
+// Thrown by connect() when the server's certificate is not the one expected, or
+// no fingerprint was set. presented is the fingerprint it showed; nothing was
+// sent to it.
+struct CertificateMismatch : SocketError {
+  CertificateMismatch(const std::string& what, std::string presentedFp, bool wasConfigured)
+      : SocketError(what), presented(std::move(presentedFp)), configured(wasConfigured) {}
+  std::string presented;
+  bool configured;
+};
+
 class RPCConnection {
 public:
   explicit RPCConnection(std::string host = "localhost",
@@ -33,7 +49,13 @@ public:
   RPCConnection(const RPCConnection&) = delete;
   RPCConnection& operator=(const RPCConnection&) = delete;
 
-  void connect();      // open the socket
+  // The server certificate's SHA-256 fingerprint ("AB:CD:...", as
+  // rpmgui.exe --show-management-key shows it). Call before connect().
+  void setFingerprint(std::string fingerprint) { fingerprint_ = std::move(fingerprint); }
+  // This computer, which RPM lets connect without TLS.
+  static bool isLocal(const std::string& host);
+
+  void connect();      // open the socket (and TLS)
   void disconnect();   // close the socket
   bool connected() const { return connected_; }
 
@@ -42,13 +64,18 @@ public:
   Json comm(const Json& obj);   // send then recv
 
 private:
-  void write(const std::string& data);          // send all bytes
+  void write(const std::string& data);          // send all bytes (encrypted)
+  void sendRaw(const std::string& data);        // send all bytes as they are
+  void handshake();
   std::string readUntil(char terminator);       // buffered read
 
   std::string host_;
   unsigned short port_;
   bool connected_ = false;
   std::string buffer_;
+  std::string fingerprint_;
+  struct Tls;                  // Schannel session, kept out of this header
+  std::unique_ptr<Tls> tls_;
 
   // SOCKET is UINT_PTR on Windows; kept as an opaque integer to avoid leaking
   // <winsock2.h> into this header.

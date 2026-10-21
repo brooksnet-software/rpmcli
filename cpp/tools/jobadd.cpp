@@ -6,12 +6,14 @@
 #include "common.hpp"
 
 int main(int argc, char** argv) {
-  if (argc != 3) {
-    std::cerr << "usage: jobadd <queue> <job-file>\n";
+  rpmtools::Connection conn;
+  const auto args = rpmtools::parseArgs(argc, argv, conn);
+  if (args.size() != 2) {
+    std::cerr << "usage: jobadd [connection options] <queue> <job-file>\n" << rpmtools::connectionUsage();
     return 2;
   }
-  const std::string queue = argv[1];
-  const std::string job = argv[2];
+  const std::string queue = args[0];
+  const std::string job = args[1];
 
   std::ifstream f(job);
   if (!f.good()) {
@@ -20,7 +22,7 @@ int main(int argc, char** argv) {
   }
   f.close();
 
-  auto r = rpmtools::connectOrExit();
+  auto r = rpmtools::connectOrExit("rpmcli jobadd", conn);
   const auto queues = rpmtools::queueLookup(r->queueListNames());
   auto it = queues.find(queue);
   if (it == queues.end()) {

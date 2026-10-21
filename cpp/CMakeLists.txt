@@ -48,7 +48,7 @@ else()
 endif()
 
 if(WIN32)
-  target_link_libraries(rpm PUBLIC ws2_32)
+  target_link_libraries(rpm PUBLIC ws2_32 secur32 crypt32)   # Schannel TLS (src/RpmTls.h)
 endif()
 
 # ---- standalone utilities --------------------------------------------------

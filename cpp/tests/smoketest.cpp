@@ -1,11 +1,12 @@
 // smoketest - read-only end-to-end check against a live RPM server.
 //
-//   smoketest [key] [host] [port]
+//   smoketest <key> [host] [port] [fingerprint]
 //
 // Connects, authorizes, loads the command list, and prints queue names. It
 // only issues read-only RPC calls (app-key, list-all-rpc, queue-list-names),
 // so it is safe to run against a production server. The key is taken from the
-// command line so no credential needs to be compiled in.
+// command line so no credential needs to be compiled in; the fingerprint is
+// needed for any server but this computer.
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -13,10 +14,15 @@
 #include "rpm/RPM.hpp"
 
 int main(int argc, char** argv) {
-  const std::string key  = argc > 1 ? argv[1] : "8c14c198-f6cb-4a13-be97-33214ea969f2";
+  if (argc < 2) {
+    std::cerr << "usage: smoketest <key> [host] [port] [fingerprint]\n";
+    return 2;
+  }
+  const std::string key  = argv[1];
   const std::string host = argc > 2 ? argv[2] : "localhost";
   const unsigned short port =
       static_cast<unsigned short>(argc > 3 ? std::atoi(argv[3]) : 9198);
+  const std::string fingerprint = argc > 4 ? argv[4] : "";
 
 #if defined(RPM_JSON_BOOST)
   std::cout << "[backend: boost::json]\n";
@@ -25,12 +31,14 @@ int main(int argc, char** argv) {
 #endif
 
   rpm::RPM r(host, port);
+  r.setClient("rpmcli smoketest");
+  r.setFingerprint(fingerprint);
   const rpm::ConnectResult res = r.connect(key);
   if (!res.ok()) {
-    std::cerr << "connect failed ("
-              << (res.status == rpm::ConnectStatus::Unreachable ? "unreachable"
-                                                                : "unauthorized")
-              << "): " << res.message << "\n";
+    const char* why = res.status == rpm::ConnectStatus::Unreachable ? "unreachable"
+                    : res.status == rpm::ConnectStatus::Unauthorized ? "unauthorized"
+                                                                     : "certificate rejected";
+    std::cerr << "connect failed (" << why << "): " << res.message << "\n";
     return 1;
   }
 

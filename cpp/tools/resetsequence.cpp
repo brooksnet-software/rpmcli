@@ -5,13 +5,15 @@
 #include "common.hpp"
 
 int main(int argc, char** argv) {
-  if (argc != 2) {
-    std::cerr << "usage: resetsequence <queue>\n";
+  rpmtools::Connection conn;
+  const auto args = rpmtools::parseArgs(argc, argv, conn);
+  if (args.size() != 1) {
+    std::cerr << "usage: resetsequence [connection options] <queue>\n" << rpmtools::connectionUsage();
     return 2;
   }
-  const std::string queue = argv[1];
+  const std::string queue = args[0];
 
-  auto r = rpmtools::connectOrExit();
+  auto r = rpmtools::connectOrExit("rpmcli resetsequence", conn);
   const auto queues = rpmtools::queueLookup(r->queueListNames());
   auto it = queues.find(queue);
   if (it == queues.end()) {

@@ -8,18 +8,27 @@ Created on Jun 10, 2013
 '''
 from code import interact
 from collections import deque, defaultdict
-from contextlib import closing
-import shelve
 from threading import Thread, Lock
 from time import sleep
 
-from rpmcli.backend.RPCConnection import RPCConnection
+from rpmcli import settings
+from rpmcli.backend.RPCConnection import RPCConnection, CertificateMismatch
+
+
+class AuthError(Exception):
+  """The server refused the RPC key and there is no one to ask for another."""
 
 
 class RPM(object):
   """
     The RPM Class encapsulates an RPC Connection to a server
     running RPM Remote Print Manager.
+
+    host, port, key and fingerprint left as None come from rpmcli.settings.
+    It connects in the background; ``ready`` turns True once it is logged in,
+    and ``error`` is set instead if it gives up (a rejected key or a server
+    certificate that does not match).  When run interactively it asks for a
+    missing key or fingerprint and saves them once they work.
   """
 
   methodspec = {
@@ -158,21 +167,30 @@ class RPM(object):
                'user-modify'}
 
   def __init__(self,
-               host = 'localhost',
-               port = 9198,
+               host = None,
+               port = None,
                key = None,
-               closehandler = None):
-    self.host = host
-    self.port = port
-    self.key = key
+               closehandler = None,
+               client = 'rpmcli',
+               fingerprint = None):
+    self.host, self.port, self.key, self.fingerprint = settings.resolve(host, port, key, fingerprint)
+    # Sent with app-key so the RPM server's Events log can name the program
+    # that logged in (RPM 7 and later; older servers ignore it).  Informational
+    # only: the server does not verify it.
+    self.client = client
     self.conn = None
     self.ready = False
-    self._bgconnect(True)
+    self.error = None
+    self.unsaved = {}     # values typed in, saved once the server accepts them
     self.conduit = None
     self.closehandler = closehandler
     self.L = Lock()
     self.logfunc = None
-    
+    self._bgconnect(True)
+
+  def _connection(self):
+    return RPCConnection(self.host, self.port, fingerprint = self.fingerprint)
+
   def _bgconnect(self, start = False):
     if start:
       t = Thread(target = self._bgconnect)
@@ -180,27 +198,51 @@ class RPM(object):
       return t.start()
     while True:
       try:
-        self.conn = RPCConnection(self.host, self.port)
+        self.conn = self._connection()
         self.auth(self.key)
         return self.loadcmds()
+      except CertificateMismatch as e:
+        if not self._askfingerprint(e):
+          self.error = e
+          return
+      except AuthError as e:
+        self.error = e
+        return
       except:
-        pass
+        sleep(5)    # server down or refusing us; don't hammer it
+
+  def _askfingerprint(self, mismatch):
+    print(mismatch)
+    # A different certificate than the one configured may mean the connection
+    # is being intercepted; only a missing fingerprint is asked for.
+    answer = None
+    if not mismatch.expected and settings.interactive():
+      answer = settings.ask('Certificate fingerprint of %s:%d (rpmgui.exe --show-management-key '
+                            'on the server shows it): ' % (self.host, self.port))
+    if not answer:
+      print('rpmgui.exe --show-management-key on the RPM server shows its fingerprint.')
+      return False
+    self.fingerprint = self.unsaved['fingerprint'] = answer
+    return True
 
   def auth(self, key):
-    if key is not None:
-      self.rpckey = key
-      authorized = self.app_key()
-      if authorized['success']:
-        return authorized
-    with closing(shelve.open('constants')) as store:
-      mykeystr = '%s-%d-%s' % (self.host, self.port, 'rpckey')
-      self.rpckey = store.get(mykeystr, '')
-      while True:
+    self.rpckey = key or ''
+    while True:
+      if self.rpckey:
         authorized = self.app_key()
         if authorized['success']:
+          if self.unsaved:
+            settings.save(self.host, self.port, **self.unsaved)
+            self.unsaved = {}
           return authorized
         print(authorized['message'])
-        store[mykeystr] = self.rpckey = input('Please enter your RPC Key: ')
+        # the server drops a connection after a few bad keys
+        self.conn = self._connection()
+      answer = settings.ask('Please enter your RPC Key: ') if settings.interactive() else None
+      if not answer:
+        raise AuthError('RPM on %s:%d %s' % (self.host, self.port,
+                        'did not accept the RPC key' if self.rpckey else 'needs an RPC key'))
+      self.rpckey = self.key = self.unsaved['key'] = answer
 
   def _gen(self, cmd):
     def func(self):
@@ -245,8 +287,8 @@ class RPM(object):
       Events are collected into a deque for fast appends.
     """
     if self.conduit is None:
-      self.conduit = RPCConnection(self.host, self.port)
-      self.conduit.comm(dict(command = 'app-key', key = self.rpckey))
+      self.conduit = self._connection()
+      self.conduit.comm(dict(command = 'app-key', key = self.rpckey, client = self.client))
       self.events = deque()
       self.responses = deque()
       self.errors = deque()
@@ -313,7 +355,7 @@ class RPM(object):
       print("Unable to successfully call %s" % handler.__name__)
 
   def app_key(self):
-    return self.command('app-key', key = self.rpckey)
+    return self.command('app-key', key = self.rpckey, client = self.client)
 
   def setlogfunc(self, func):
     self.logfunc = func

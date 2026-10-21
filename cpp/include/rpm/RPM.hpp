@@ -25,11 +25,15 @@
 
 namespace rpm {
 
-enum class ConnectStatus { Ok, Unreachable, Unauthorized };
+enum class ConnectStatus { Ok, Unreachable, Unauthorized, CertificateRejected };
 
 struct ConnectResult {
   ConnectStatus status = ConnectStatus::Unreachable;
   std::string message;                 // server/socket detail on failure
+  // CertificateRejected: the fingerprint the server presented, and whether one
+  // was configured (if so, it differed: perhaps the connection is intercepted).
+  std::string presented;
+  bool configured = false;
   bool ok() const { return status == ConnectStatus::Ok; }
 };
 
@@ -44,6 +48,15 @@ public:
   // Connect, authorize with the RPC key, and load the command list.
   ConnectResult connect(const std::string& key);
   bool ready() const { return ready_; }
+
+  // Name sent with app-key so the RPM server's Events log can say which program
+  // logged in (RPM 7 and later; older servers ignore it). Informational only:
+  // the server does not verify it. Set before connect().
+  void setClient(std::string client) { client_ = std::move(client); }
+
+  // The server certificate's fingerprint, for TLS (see RPCConnection). Needed
+  // for any server but this computer. Set before connect().
+  void setFingerprint(std::string fingerprint) { fingerprint_ = std::move(fingerprint); }
 
   // Low-level request: {command: cmd, ...params}.
   Json command(const std::string& cmd, const Json& params = Json::object());
@@ -95,6 +108,8 @@ private:
   std::string host_;
   unsigned short port_;
   std::string key_;
+  std::string client_ = "rpmcli";
+  std::string fingerprint_;
   std::set<std::string> commands_;
   bool ready_ = false;
   std::mutex mutex_;
