@@ -44,3 +44,16 @@ dist_*/
 # in %APPDATA%\rpmcli\rpmcli.ini (see rpmcli/settings.py)
 constants
 constants.*
+
+# AI coding agent local folders (per-machine, not for the repo)
+.claude/
+.codex/
+.gemini/
+.cursor/
+.windsurf/
+.continue/
+.amazonq/
+.junie/
+.kiro/
+.opencode/
+.aider*
