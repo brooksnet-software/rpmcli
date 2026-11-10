@@ -8,6 +8,9 @@
 //   job.add  [778, 779]   (list of job-ids)
 //   job.done 777          (completes 777 -> pruned)
 // Expected final tracked state: 778 and 779 retained (job.add only); 777 gone.
+// It also refuses a settings.set subscription, as RPM 7 does for an app key,
+// and then sends that event anyway: the refusal must reach the error handler
+// and the event must not reach the dropped handler.
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
@@ -15,6 +18,7 @@
 #include <chrono>
 #include <iostream>
 #include <map>
+#include <mutex>
 #include <set>
 #include <string>
 #include <thread>
@@ -64,9 +68,16 @@ void connHandler(SOCKET s) {
     } else if (msg.find("app-key") != std::string::npos) {
       sendLine(s, R"({"success":true,"command":"app-key"})");
     } else if (msg.find("callback-add") != std::string::npos) {
+      // As RPM 7 does for an app key whose port does not permit it.
+      if (msg.find("settings.set") != std::string::npos) {
+        sendLine(s, R"({"success":false,"message":"callback 'settings.set' is not permitted on this port","command":"callback-add"})");
+        continue;
+      }
+      sendLine(s, R"({"success":true,"message":"added callback","command":"callback-add"})");
       // Emit events only once both callbacks are registered, so the tracker's
       // event set is complete before any event is delivered (deterministic).
       if (msg.find("job.done") != std::string::npos) {
+        sendLine(s, R"({"callback":"settings.set"})");   // refused: must not be dispatched
         sendLine(s, R"({"callback":"job.add","job-id":777})");
         sendLine(s, R"({"callback":"job.add","job-id":[778,779]})");
         sendLine(s, R"({"callback":"job.done","job-id":777})");
@@ -112,6 +123,16 @@ int main() {
   }
   std::cout << "connected; commands loaded: " << r.commands().size() << "\n";
 
+  // A subscription the server refuses: reported, and its handler dropped.
+  std::atomic<int> settingsEvents{0};
+  std::string refused;
+  std::mutex refusedMutex;
+  r.setErrorHandler([&](const std::string& name, const rpm::Json&) {
+    std::lock_guard<std::mutex> lock(refusedMutex);
+    refused = name;
+  });
+  r.registerCallback("settings.set", [&](const rpm::Json&) { ++settingsEvents; });
+
   rpm::JobTracker jt(r);
   jt.add("job.add");
   jt.add("job.done");
@@ -141,9 +162,16 @@ int main() {
   ok &= has("778", "job.add");      // list job-id dispatched and retained
   ok &= has("779", "job.add");
   ok &= (jobs.size() == 2);
+  {
+    std::lock_guard<std::mutex> lock(refusedMutex);
+    std::cout << "refused callback: " << (refused.empty() ? "(none)" : refused)
+              << "; its events dispatched: " << settingsEvents << "\n";
+    ok &= (refused == "settings.set");
+  }
+  ok &= (settingsEvents == 0);
 
   std::cout << (ok
-      ? "PASS: dispatch, list job-ids, retain-incomplete, and prune all work\n"
+      ? "PASS: dispatch, list job-ids, retain-incomplete, prune and refused subscriptions all work\n"
       : "FAIL\n");
   return ok ? 0 : 1;
 }

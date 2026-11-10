@@ -52,9 +52,11 @@ connection options: [--host <server>] [--port <rpc-port>] [--key <rpc-key>]
 No RPC key is built in. Generate one for each program on the RPM server
 (Settings > Ports > Modify Port > Add Program > Generate). RPM 7 accepts
 connections from other computers only over TLS, and the utilities check the
-server's certificate against its fingerprint, which `rpmgui.exe
---show-management-key` shows on the server, before sending the key. A server
-on this computer is reached without TLS unless a fingerprint is given.
+server's certificate against a fingerprint before sending the key.
+`rpmgui.exe --show-management-key` on the server shows two, and either works:
+the certificate fingerprint, and the public key fingerprint, which stays the
+same when the certificate is renewed with the same key. A server on this
+computer is reached without TLS unless a fingerprint is given.
 
 Each value comes from the command line, then the environment (`RPM_HOST`,
 `RPM_PORT`, `RPM_KEY`, `RPM_FINGERPRINT`), then `%APPDATA%\rpmcli\rpmcli.ini`,
@@ -74,6 +76,20 @@ there once the server accepts it. It never offers to accept a certificate that
 differs from the configured fingerprint. The utilities send `"client":
 "rpmcli <tool>"` with the key, so RPM's Events log names them.
 
+### Permissions
+
+An application key may run only what its RPC port's Remote Permissions grant
+(Settings > Ports > Modify Port); `RPM::commands()` and `RPM::permits()` say
+which, and the utilities check before calling and name the permission that is
+missing. Each exits with 1 when RPM refuses the request.
+
+| Utility         | Port permissions                         | Notes |
+|-----------------|------------------------------------------|-------|
+| `jobadd`        | Queue Permissions > View                 | Runs on the RPM server: RPM offers `job-add` only to programs there. RPM 7 reads only a copy in its `Incoming` folder, so `jobadd` copies the file there; the original stays put. |
+| `jobhold`       | Job Permissions > Hold                   | |
+| `queuesuspend`  | Queue Permissions > View, Suspend        | Uses `queue-suspend`. |
+| `resetsequence` | Queue Permissions > View, Configure      | Uses `queue-reset-total`, as Queue > Reset Total in the GUI; RPM releases from before it was added don't have it. |
+
 `smoketest <key> [host] [port] [fingerprint]` issues only read-only calls and
 is safe to run against a live server:
 
@@ -88,7 +104,10 @@ is safe to run against a live server:
 starts a background receiver thread that dispatches events to the registered
 handlers. Because `std::function` is not comparable, handlers are identified by
 the id returned from `registerCallback` (rather than by function identity as in
-Python); pass it to `unregisterCallback`. `JobTracker` builds on this to track
+Python); pass it to `unregisterCallback`. RPM 7 refuses an application key a
+subscription its port does not permit (and some that need the management key);
+the receiver then drops that callback's handlers and passes the server's reply
+to the function given to `setErrorHandler` (by default, it writes to stderr). `JobTracker` builds on this to track
 which events each job has received, dropping jobs once they have seen every
 tracked event.
 

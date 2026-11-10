@@ -12,6 +12,7 @@
 #define RPM_RPM_HPP
 
 #include <atomic>
+#include <deque>
 #include <functional>
 #include <map>
 #include <memory>
@@ -26,6 +27,12 @@
 namespace rpm {
 
 enum class ConnectStatus { Ok, Unreachable, Unauthorized, CertificateRejected };
+
+// Thrown by registerCallback() when the server refuses the RPC key on the
+// event connection.
+struct AuthError : std::runtime_error {
+  explicit AuthError(const std::string& what) : std::runtime_error(what) {}
+};
 
 struct ConnectResult {
   ConnectStatus status = ConnectStatus::Unreachable;
@@ -72,7 +79,10 @@ public:
   Json jobHold(long long jid, const std::string& hold);
   Json queueModify(const std::map<std::string, Json>& kwargs);
 
+  // The commands list-all-rpc reported: RPM 7 lists only those this port's
+  // permissions grant the key, and job-add only to programs on the server.
   const std::set<std::string>& commands() const { return commands_; }
+  bool permits(const std::string& cmd) const { return commands_.count(cmd) != 0; }
 
   // ---- asynchronous event callbacks ----------------------------------------
   using EventHandler = std::function<void(const Json&)>;
@@ -80,7 +90,13 @@ public:
 
   // Register a handler for an RPM callback (e.g. "job.add"). The first
   // registration opens a secondary "conduit" connection and starts a background
-  // receiver thread. Returns an id used to unregister this handler.
+  // receiver thread. Returns an id used to unregister this handler. Throws
+  // AuthError (or a SocketError) if the conduit cannot log in.
+  //
+  // RPM 7 refuses some subscriptions to an application key: those whose port
+  // does not permit viewing what they report, and a few that need the
+  // management key. The refusal arrives on the receiver thread, which drops the
+  // callback's handlers and passes the server's reply to the error handler.
   //
   // Note: unlike the Python API (which keys handlers by function identity),
   // std::function is not comparable, so handlers are identified by the returned
@@ -93,6 +109,10 @@ public:
 
   // Set a function invoked if the event connection is closed by the server.
   void setCloseHandler(std::function<void()> fn);
+
+  // Set a function given the callback name and the server's reply when RPM
+  // refuses a subscription. By default the refusal is written to std::cerr.
+  void setErrorHandler(std::function<void(const std::string&, const Json&)> fn);
 
   static const std::map<std::string, std::map<std::string, std::string>>& methodspec();
   static const std::set<std::string>& addkwargs();
@@ -122,6 +142,10 @@ private:
   std::map<std::string, std::map<HandlerId, EventHandler>> callbacks_;
   HandlerId nextHandlerId_ = 1;
   std::function<void()> closeHandler_;
+  std::function<void(const std::string&, const Json&)> errorHandler_;
+  // Callback names awaiting the server's reply to callback-add ("" for
+  // callback-remove), in the order sent: the replies don't name them.
+  std::deque<std::string> pending_;
 };
 
 }  // namespace rpm

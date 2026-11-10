@@ -3,7 +3,7 @@
 from argparse import ArgumentParser as ArgParse
 import sys
 
-from rpmcli.standalones import add_connection_options, connect
+from rpmcli.standalones import add_connection_options, connect, finish, require
 
 
 if __name__ == '__main__':
@@ -13,9 +13,10 @@ if __name__ == '__main__':
   A.add_argument("hold", help = "Hold State - One Of (true, false, toggle).")
   add_connection_options(A)
   options = A.parse_args()
-  # Connect and check the RPC key.
-  r = connect(options)
   if options.hold not in ('true', 'false', 'toggle'):
     print("Invalid Hold Option.")
     sys.exit(1)
-  print(r.job_hold(jid = options.jobid, hold = options.hold))
+  # Connect and check the RPC key.
+  r = connect(options)
+  require(r, 'job-hold')
+  finish(r.job_hold(jid = options.jobid, hold = options.hold))

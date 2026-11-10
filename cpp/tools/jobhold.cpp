@@ -28,6 +28,6 @@ int main(int argc, char** argv) {
   }
 
   auto r = rpmtools::connectOrExit("rpmcli jobhold", conn);
-  std::cout << r->jobHold(jobid, hold).dump() << "\n";
-  return 0;
+  rpmtools::require(*r, conn, "job-hold");
+  return rpmtools::finish(r->jobHold(jobid, hold));
 }

@@ -1,4 +1,5 @@
-// resetsequence - reset an RPM queue's sequence number to zero.
+// resetsequence - reset an RPM queue's sequence number (its job total) to zero,
+// as Queue > Reset Total in the RPM GUI.
 #include <iostream>
 #include <string>
 
@@ -14,14 +15,7 @@ int main(int argc, char** argv) {
   const std::string queue = args[0];
 
   auto r = rpmtools::connectOrExit("rpmcli resetsequence", conn);
-  const auto queues = rpmtools::queueLookup(r->queueListNames());
-  auto it = queues.find(queue);
-  if (it == queues.end()) {
-    std::cout << "Queue name not found.\n";
-    return 1;
-  }
-  std::cout << r->queueModify({{"qid", rpm::Json(std::stoll(it->second))},
-                               {"seqno", rpm::Json(0)}}).dump()
-            << "\n";
-  return 0;
+  rpmtools::require(*r, conn, "queue-reset-total");
+  const long long qid = rpmtools::queueId(*r, conn, queue);
+  return rpmtools::finish(r->call("queue-reset-total", {{"qid", rpm::Json(qid)}}));
 }

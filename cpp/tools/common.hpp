@@ -161,8 +161,9 @@ inline std::string ask(const std::string& prompt, const std::string& help) {
 }
 
 // Connect and check the RPC key, or print guidance and exit. client is the
-// name sent with app-key, e.g. "rpmcli jobadd".
-inline std::unique_ptr<rpm::RPM> connectOrExit(const std::string& client, Connection c) {
+// name sent with app-key, e.g. "rpmcli jobadd". On return, c holds the host,
+// port, key and fingerprint that worked.
+inline std::unique_ptr<rpm::RPM> connectOrExit(const std::string& client, Connection& c) {
   resolve(c);
   const std::string where = c.host + ":" + std::to_string(c.port);
   std::map<std::string, std::string> unsaved;  // typed in; saved once they work
@@ -206,12 +207,60 @@ inline std::unique_ptr<rpm::RPM> connectOrExit(const std::string& client, Connec
   std::exit(1);
 }
 
-// Build a queue-name -> queue-id lookup from a queue-list-names response.
-inline std::map<std::string, std::string> queueLookup(const rpm::Json& names) {
-  std::map<std::string, std::string> queues;
-  for (const auto& kv : names.objectItems())
-    if (kv.second.isString()) queues[kv.second.asString()] = kv.first;
-  return queues;
+// The port permission (Settings > Ports > Modify Port > Remote Permissions) that
+// lets an application key run each command the utilities use.
+inline std::string permissionFor(const std::string& cmd) {
+  static const std::map<std::string, std::string> permissions = {
+    {"queue-list-names", "Queue Permissions > View"},
+    {"queue-suspend",    "Queue Permissions > Suspend"},
+    {"queue-reset-total", "Queue Permissions > Configure"},
+    {"job-hold",         "Job Permissions > Hold"},
+  };
+  auto it = permissions.find(cmd);
+  return it == permissions.end() ? "the permission for it" : it->second;
+}
+
+// Exit with an explanation unless the server lets this key run cmd. RPM 7
+// offers an application key only what its port's permissions grant.
+inline void require(const rpm::RPM& r, const Connection& c, const std::string& cmd) {
+  if (r.permits(cmd)) return;
+  if (cmd == "job-add")
+    std::cerr << "RPM accepts job-add only from programs on the RPM server itself, connecting to a port\n"
+                 "whose Authorized Hosts include localhost (and not at all once RPM's license has expired).\n";
+  else if (cmd == "queue-reset-total")   // older RPM releases don't have it at all
+    std::cerr << "RPC port " << c.port << " on " << c.host << " does not offer " << cmd
+              << ". RPM releases from before " << cmd << " was added don't\n"
+                 "have it; otherwise, on the RPM server select " << permissionFor(cmd)
+              << " under Remote Permissions for\n"
+                 "that port (Settings > Ports > Modify Port), or connect to a port that permits it.\n";
+  else
+    std::cerr << "RPC port " << c.port << " on " << c.host << " does not permit " << cmd
+              << ". On the RPM server, select " << permissionFor(cmd) << " under\n"
+                 "Remote Permissions for that port (Settings > Ports > Modify Port), or connect to a port\n"
+                 "that permits it.\n";
+  std::exit(1);
+}
+
+// Print the server's reply; the exit code for it: 0 if it succeeded, else 1.
+inline int finish(const rpm::Json& result) {
+  std::cout << result.dump() << "\n";
+  return result.at("success").asBool() ? 0 : 1;
+}
+
+// The id of the queue called name, or exit with an explanation.
+inline long long queueId(rpm::RPM& r, const Connection& c, const std::string& name) {
+  require(r, c, "queue-list-names");
+  const rpm::Json names = r.queueListNames();
+  if (!names.at("success").asBool()) std::exit(finish(names));
+  // the reply maps each queue id to its name, beside "success" and "command"
+  for (const auto& kv : names.objectItems()) {
+    const std::string& id = kv.first;
+    if (!id.empty() && id.find_first_not_of("0123456789") == std::string::npos &&
+        kv.second.isString() && kv.second.asString() == name)
+      return std::stoll(id);
+  }
+  std::cout << "Queue name not found.\n";
+  std::exit(1);
 }
 
 }  // namespace rpmtools

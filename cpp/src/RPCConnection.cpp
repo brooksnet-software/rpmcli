@@ -144,12 +144,14 @@ void RPCConnection::handshake() {
   }
 
   const std::string where = host_ + ":" + std::to_string(port_);
+  // Either fingerprint RPM shows will do: the certificate's or its public key's.
   const std::string presented = tls->session->PeerFingerprint();
-  if (!RpmTls::SameFingerprint(presented, fingerprint_)) {
+  if (!tls->session->PeerMatches(fingerprint_)) {
     if (fingerprint_.empty())
       throw CertificateMismatch("no certificate fingerprint is configured for " + where, presented, false);
     throw CertificateMismatch("the certificate of " + where + " has fingerprint " + presented +
-                              ", not the one configured for it", presented, true);
+                              " (public key " + tls->session->PeerPublicKeyFingerprint() +
+                              "), not the one configured for it", presented, true);
   }
 
   timeout = 0;

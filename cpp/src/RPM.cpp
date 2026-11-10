@@ -108,6 +108,11 @@ void RPM::setCloseHandler(std::function<void()> fn) {
   closeHandler_ = std::move(fn);
 }
 
+void RPM::setErrorHandler(std::function<void(const std::string&, const Json&)> fn) {
+  std::lock_guard<std::mutex> lock(cbMutex_);
+  errorHandler_ = std::move(fn);
+}
+
 RPM::HandlerId RPM::registerCallback(const std::string& callback,
                                      EventHandler handler) {
   std::lock_guard<std::mutex> lock(cbMutex_);
@@ -116,14 +121,20 @@ RPM::HandlerId RPM::registerCallback(const std::string& callback,
   // The app-key exchange completes before the receiver thread starts so the
   // two never read from the conduit concurrently.
   if (!conduit_) {
-    conduit_.reset(new RPCConnection(host_, port_, /*autoConnect=*/false));
-    conduit_->setFingerprint(fingerprint_);
-    conduit_->connect();
+    std::unique_ptr<RPCConnection> conduit(new RPCConnection(host_, port_, /*autoConnect=*/false));
+    conduit->setFingerprint(fingerprint_);
+    conduit->connect();
     Json auth = Json::object();
     auth.set("command", "app-key");
     auth.set("key", key_);
     auth.set("client", client_);
-    conduit_->comm(auth);
+    Json reply = conduit->comm(auth);
+    if (!reply.isObject() || !reply.at("success").asBool())
+      throw AuthError("RPM on " + host_ + ":" + std::to_string(port_) +
+                      " refused the event connection: " +
+                      (reply.isObject() ? reply.at("message").asString("no reason given") : "no reply"));
+    conduit_ = std::move(conduit);
+    pending_.clear();
     receiverStop_ = false;
     receiver_ = std::thread(&RPM::receiverLoop, this);
   }
@@ -139,6 +150,7 @@ RPM::HandlerId RPM::registerCallback(const std::string& callback,
     Json add = Json::object();
     add.set("command", "callback-add");
     add.set("callback", callback);
+    pending_.push_back(callback);
     conduit_->send(add);
   }
   return id;
@@ -156,6 +168,7 @@ void RPM::unregisterCallback(const std::string& callback, HandlerId id) {
     Json rm = Json::object();
     rm.set("command", "callback-remove");
     rm.set("callback", callback);
+    pending_.push_back(std::string());
     conduit_->send(rm);
   }
 }
@@ -172,7 +185,32 @@ void RPM::receiverLoop() {
       break;  // conduit closed (typically during shutdown)
     }
     if (receiverStop_) break;
-    if (!data.isObject() || !data.contains("callback")) continue;
+    if (!data.isObject()) continue;
+    const std::string reply = data.at("command").asString("");
+    if ((reply == "callback-add" || reply == "callback-remove") && data.contains("success")) {
+      std::string name;
+      std::function<void(const std::string&, const Json&)> onError;
+      {
+        std::lock_guard<std::mutex> lock(cbMutex_);
+        if (!pending_.empty()) {
+          name = pending_.front();
+          pending_.pop_front();
+        }
+        if (reply == "callback-add" && !data.at("success").asBool()) {
+          if (!name.empty()) callbacks_.erase(name);
+          onError = errorHandler_;
+        } else {
+          continue;
+        }
+      }
+      if (onError)
+        onError(name, data);
+      else
+        std::cerr << "RPM refused callback " << name << ": "
+                  << data.at("message").asString("no reason given") << "\n";
+      continue;
+    }
+    if (!data.contains("callback")) continue;
 
     const std::string callback = data.at("callback").asString();
     // Copy the current handlers under the lock, then dispatch outside it so a
@@ -284,6 +322,7 @@ const std::map<std::string, std::map<std::string, std::string>>& RPM::methodspec
     {"queue-refresh",        {{"qid", "queue-id"}}},
     {"queue-remove",         {{"qid", "queue-id"}}},
     {"queue-remove-archive", {{"qid", "queue-id"}}},
+    {"queue-reset-total",    {{"qid", "queue-id"}, {"qname", "queue-name"}}},
     {"queue-rename",         {{"qid", "queue-id"}, {"qname", "queue-name"}, {"newname", "newname"}}},
     {"queue-reprint",        {{"qid", "queue-id"}, {"qname", "queue-name"}}},
     {"queue-seqno",          {{"qid", "queue-id"}, {"qname", "queue-name"}}},

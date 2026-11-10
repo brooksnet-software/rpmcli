@@ -20,18 +20,8 @@ int main(int argc, char** argv) {
   }
 
   auto r = rpmtools::connectOrExit("rpmcli queuesuspend", conn);
-  const auto queues = rpmtools::queueLookup(r->queueListNames());
-  auto it = queues.find(queue);
-  if (it == queues.end()) {
-    std::cout << "Queue name not found.\n";
-    return 1;
-  }
-
-  // true/false become booleans; toggle stays a string (matches the Python CLI).
-  rpm::Json suspend = (state == "toggle") ? rpm::Json("toggle")
-                                          : rpm::Json(state == "true");
-  std::cout << r->queueModify({{"qid", rpm::Json(std::stoll(it->second))},
-                               {"suspend", suspend}}).dump()
-            << "\n";
-  return 0;
+  rpmtools::require(*r, conn, "queue-suspend");
+  const long long qid = rpmtools::queueId(*r, conn, queue);
+  // queue-suspend, not queue-modify: RPM does not implement queue-modify.
+  return rpmtools::finish(r->call("queue-suspend", {{"qid", rpm::Json(qid)}, {"state", rpm::Json(state)}}));
 }

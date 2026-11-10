@@ -3,8 +3,9 @@
 Nothing secret ships with rpmcli.  Each site generates its own application key
 in RPM (Settings > Ports > Modify Port > Add Program > Generate), and reads the
 server's certificate fingerprint with ``rpmgui.exe --show-management-key`` on
-the server.  The fingerprint is not secret; it lets the client check that it
-is talking to that server before it sends the key.
+the server; the public key fingerprint it also shows works as well.  The
+fingerprint is not secret; it lets the client check that it is talking to that
+server before it sends the key.
 
 Each value is taken from the first of these that has it:
 

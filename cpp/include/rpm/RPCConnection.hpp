@@ -50,7 +50,8 @@ public:
   RPCConnection& operator=(const RPCConnection&) = delete;
 
   // The server certificate's SHA-256 fingerprint ("AB:CD:...", as
-  // rpmgui.exe --show-management-key shows it). Call before connect().
+  // rpmgui.exe --show-management-key shows it), or its public key fingerprint,
+  // which the same command also shows. Call before connect().
   void setFingerprint(std::string fingerprint) { fingerprint_ = std::move(fingerprint); }
   // This computer, which RPM lets connect without TLS.
   static bool isLocal(const std::string& host);

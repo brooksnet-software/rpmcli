@@ -21,21 +21,56 @@ def normalize_fingerprint(text):
   return digits
 
 
+def _sha256_text(data):
+  digest = hashlib.sha256(data).hexdigest().upper()
+  return ':'.join(digest[i:i + 2] for i in range(0, len(digest), 2))
+
+
 def certificate_fingerprint(der):
   """SHA-256 of a certificate as "AB:CD:...", the form RPM shows."""
-  digest = hashlib.sha256(der).hexdigest().upper()
-  return ':'.join(digest[i:i + 2] for i in range(0, len(digest), 2))
+  return _sha256_text(der)
+
+
+def _der_element(der, pos):
+  """(start of contents, end) of the DER element at pos."""
+  length = der[pos + 1]
+  pos += 2
+  if length & 0x80:
+    count = length & 0x7f
+    length = int.from_bytes(der[pos:pos + count], 'big')
+    pos += count
+  return pos, pos + length
+
+
+def public_key_fingerprint(der):
+  """SHA-256 of a certificate's SubjectPublicKeyInfo as "AB:CD:...", the
+  "public key fingerprint" RPM also shows.  Unlike the certificate fingerprint
+  it stays the same when the certificate is renewed with the same key.  ''
+  when the certificate cannot be read."""
+  try:
+    pos = _der_element(der, 0)[0]               # Certificate
+    pos = _der_element(der, pos)[0]             # tbsCertificate
+    if der[pos] == 0xa0:                        # [0] version
+      pos = _der_element(der, pos)[1]
+    for _ in range(5):                          # serial, signature, issuer, validity, subject
+      pos = _der_element(der, pos)[1]
+    return _sha256_text(der[pos:_der_element(der, pos)[1]])
+  except IndexError:
+    return ''
 
 
 class CertificateMismatch(Exception):
   """The server's certificate is not the one expected (or none was given).
 
-  ``presented`` is the fingerprint the server showed.  Nothing was sent to it.
+  ``presented`` is the certificate fingerprint the server showed, and
+  ``presented_key`` its public key fingerprint.  Nothing was sent to it.
   """
-  def __init__(self, host, port, presented, expected):
+  def __init__(self, host, port, presented, expected, presented_key = ''):
     self.host, self.port, self.presented, self.expected = host, port, presented, expected
+    self.presented_key = presented_key
     if expected:
-      text = 'the certificate of %s:%d has fingerprint %s, not the one configured for it' % (host, port, presented)
+      text = ('the certificate of %s:%d has fingerprint %s (public key %s), not the one configured for it'
+              % (host, port, presented, presented_key or 'unknown'))
     else:
       text = 'no certificate fingerprint is configured for %s:%d' % (host, port)
     Exception.__init__(self, text)
@@ -48,8 +83,9 @@ class RPCConnection(object):
   the same public interface (send / recv / comm) and buffering behavior.
 
   RPM 7 accepts connections from other computers only over TLS.  The server's
-  certificate is checked against ``fingerprint`` (see rpmcli.settings) before
-  anything is sent, and CertificateMismatch is raised if it differs.  A server
+  certificate is checked against ``fingerprint``, of either the certificate or
+  its public key (see rpmcli.settings), before anything is sent, and
+  CertificateMismatch is raised if it differs.  A server
   on this computer is reached without TLS unless a fingerprint is given.
   """
 
@@ -62,8 +98,24 @@ class RPCConnection(object):
     if auto:
       self._connect()
 
+  def _open(self):
+    # IPv4 first: RPM listens on IPv4 only, and Windows takes about two seconds
+    # to give up on a refused connection, such as "localhost" reached as ::1.
+    addresses = socket.getaddrinfo(self.host, self.port, 0, socket.SOCK_STREAM)
+    addresses.sort(key = lambda a: a[0] != socket.AF_INET)
+    error = OSError('could not resolve %s' % self.host)
+    for family, kind, proto, _, address in addresses:
+      sock = socket.socket(family, kind, proto)
+      try:
+        sock.connect(address)
+        return sock
+      except OSError as e:
+        sock.close()
+        error = e
+    raise error
+
   def _connect(self):
-    sock = socket.create_connection((self.host, self.port))
+    sock = self._open()
     if self.fingerprint or not is_local(self.host):
       try:
         sock = self._tls(sock)
@@ -81,10 +133,14 @@ class RPCConnection(object):
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE
     sock = context.wrap_socket(sock, server_hostname = self.host)
-    presented = certificate_fingerprint(sock.getpeercert(binary_form = True))
+    der = sock.getpeercert(binary_form = True)
+    presented = certificate_fingerprint(der)
+    presented_key = public_key_fingerprint(der)
+    # Either fingerprint RPM shows will do; they hash different structures, so
+    # one cannot be mistaken for the other.
     expected = normalize_fingerprint(self.fingerprint)
-    if not expected or normalize_fingerprint(presented) != expected:
-      raise CertificateMismatch(self.host, self.port, presented, self.fingerprint)
+    if not expected or expected not in (normalize_fingerprint(presented), normalize_fingerprint(presented_key)):
+      raise CertificateMismatch(self.host, self.port, presented, self.fingerprint, presented_key)
     self.msg('TLS %s, certificate %s', sock.version(), presented)
     return sock
 

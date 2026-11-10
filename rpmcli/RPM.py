@@ -109,6 +109,7 @@ class RPM(object):
     'queue-refresh': {'qid': 'queue-id'},
     'queue-remove': {'qid': 'queue-id'},
     'queue-remove-archive': {'qid': 'queue-id'},
+    'queue-reset-total': {'qid': 'queue-id', 'qname': 'queue-name'},
     'queue-rename': {'qid': 'queue-id', 'qname': 'queue-name', 'newname': 'newname'},
     'queue-reprint': {'qid': 'queue-id', 'qname': 'queue-name'},
     'queue-seqno': {'qid': 'queue-id', 'qname': 'queue-name'},
@@ -179,6 +180,7 @@ class RPM(object):
     # only: the server does not verify it.
     self.client = client
     self.conn = None
+    self.commands = set()   # what list-all-rpc says this key may run on this port
     self.ready = False
     self.error = None
     self.unsaved = {}     # values typed in, saved once the server accepts them
@@ -265,7 +267,11 @@ class RPM(object):
     return func
 
   def loadcmds(self):
-    for cmd in self.command('list-all-rpc')['commands']:
+    # RPM 7 lists only the commands this port's permissions grant the key, and
+    # job-add only to programs on the server itself.  Methods are generated for
+    # those; check ``commands`` before calling one that may be missing.
+    self.commands = set(self.command('list-all-rpc')['commands'])
+    for cmd in self.commands:
       method = cmd.replace('-', '_')
       # Prevent customized defintions from being overriden.
       if hasattr(self, method):
@@ -285,14 +291,27 @@ class RPM(object):
       to the RPM Server to handle async event notifications.
 
       Events are collected into a deque for fast appends.
+
+      RPM 7 refuses some subscriptions to an application key: those whose
+      port does not permit viewing what they report, and a few that need the
+      management key.  The refusal arrives on the receiver thread, which
+      prints it, appends it to ``errors`` and drops the callback's handlers.
     """
     if self.conduit is None:
-      self.conduit = self._connection()
-      self.conduit.comm(dict(command = 'app-key', key = self.rpckey, client = self.client))
+      conduit = self._connection()
+      authorized = conduit.comm(dict(command = 'app-key', key = self.rpckey, client = self.client))
+      if not (isinstance(authorized, dict) and authorized.get('success')):
+        conduit._disconnect()
+        raise AuthError('RPM on %s:%d refused the event connection: %s' % (self.host, self.port,
+                        authorized.get('message') if isinstance(authorized, dict) else authorized))
+      self.conduit = conduit
       self.events = deque()
       self.responses = deque()
       self.errors = deque()
       self.callbacks = defaultdict(set)
+      # callback names awaiting the server's reply to callback-add (or None for
+      # callback-remove), in the order sent: the replies don't name them
+      self.pending = deque()
       self.receiver(start = True)
     if callback in self.callbacks:
       self.callbacks[callback].add(func)
@@ -304,6 +323,7 @@ class RPM(object):
       self.callbacks[callback].add(func)
     else:
       self.callbacks[callback]
+    self.pending.append(callback)
     self.conduit.send(dict(command = 'callback-add', callback = callback))
 
   def unregister(self, callback, func = None):
@@ -314,6 +334,7 @@ class RPM(object):
     if self.callbacks[callback]:
       return
     self.callbacks.pop(callback)
+    self.pending.append(None)
     self.conduit.send(dict(command = 'callback-remove', callback = callback))
 
   def receiver(self, start = False):
@@ -332,6 +353,14 @@ class RPM(object):
 #         self.responses.append(data)
       if not isinstance(data, dict):
         print("Errant JSON String -", data)
+        continue
+      if data.get('command') in ('callback-add', 'callback-remove') and 'success' in data:
+        callback = self.pending.popleft() if self.pending else None
+        if data['command'] == 'callback-add' and not data['success']:
+          print("RPM refused callback %s: %s" % (callback, data.get('message')))
+          self.errors.append(data)
+          if callback is not None:
+            self.callbacks.pop(callback, None)
         continue
       if 'callback' in data:
 #         self.events.append(data)

@@ -20,10 +20,12 @@ No RPC key ships with rpmcli.  Generate one for each program on the RPM
 server (Settings > Ports > Modify Port > Add Program > Generate).
 
 RPM 7 accepts connections from other computers only over TLS.  rpmcli
-checks the server's certificate against its fingerprint, which
-"rpmgui.exe --show-management-key" shows on the server, before it sends
-the key.  A server on this computer is reached without TLS unless a
-fingerprint is given.
+checks the server's certificate against a fingerprint before it sends the
+key.  "rpmgui.exe --show-management-key" on the server shows two, and
+either works: the certificate fingerprint, and the public key fingerprint,
+which stays the same when the certificate is renewed with the same key.
+A server on this computer is reached without TLS unless a fingerprint is
+given.
 
 RPM(host, port, key, fingerprint=...) takes each value from its arguments,
 then the environment (RPM_HOST, RPM_PORT, RPM_KEY, RPM_FINGERPRINT), then
@@ -32,6 +34,31 @@ take --host, --port, --key and --fingerprint.  Run at a console, rpmcli
 asks for a missing key or fingerprint and saves it there once the server
 accepts it.  Pass client="My Program 1.0" to RPM() to name your program in
 RPM's Events log.
+
+
+
+  -- Permissions --
+
+An application key may run only what its RPC port's Remote Permissions
+grant (Settings > Ports > Modify Port), and list-all-rpc reports only
+those, so the RPM object has methods for those commands alone; r.commands
+holds their names.  job-add is offered only to programs on the RPM server
+itself.  A subscription (register) the port does not permit is refused;
+the event receiver prints the refusal, adds it to r.errors and drops the
+callback's handlers.
+
+The standalone utilities need:
+
+  jobadd         Queue Permissions > View; runs on the RPM server.  RPM 7
+                 reads only a copy in its Incoming folder, so jobadd copies
+                 the file there; the original is left in place.
+  jobhold        Job Permissions > Hold
+  queuesuspend   Queue Permissions > View and > Suspend
+  resetsequence  Queue Permissions > View and > Configure.  Uses
+                 queue-reset-total, as Queue > Reset Total in the GUI;
+                 RPM releases from before it was added don't have it.
+
+Each exits with 1 when RPM refuses the request.
 
 
 

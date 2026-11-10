@@ -19,6 +19,16 @@ FINGERPRINT_HELP = ("rpmgui.exe --show-management-key on the RPM server shows it
                     "  %s")
 
 
+# The port permission (Settings > Ports > Modify Port > Remote Permissions) that
+# lets an application key run each command the utilities use.
+PERMISSIONS = {'queue-list-names': 'Queue Permissions > View',
+               'queue-suspend': 'Queue Permissions > Suspend',
+               'queue-reset-total': 'Queue Permissions > Configure',
+               'job-hold': 'Job Permissions > Hold'}
+# Commands older RPM releases don't have at all.
+NEWER = {'queue-reset-total'}
+
+
 def add_connection_options(parser):
   """Add --host, --port, --key and --fingerprint to an ArgumentParser."""
   group = parser.add_argument_group(
@@ -101,3 +111,47 @@ def connect(options = None, client = None):
       sys.exit(1)
     sleep(0.25)
   return r
+
+
+def require(r, *commands):
+  """Exit with an explanation unless the server lets this key run commands.
+
+  RPM 7 offers an application key only what its port's permissions grant, so
+  a command it refuses has no method on ``r`` at all.
+  """
+  missing = [c for c in commands if c not in r.commands]
+  for c in missing:
+    if c == 'job-add':
+      print("RPM accepts job-add only from programs on the RPM server itself, connecting to a port\n"
+            "whose Authorized Hosts include localhost (and not at all once RPM's license has expired).")
+    elif c in NEWER:
+      print("RPC port %d on %s does not offer %s. RPM releases from before %s was added don't\n"
+            "have it; otherwise, on the RPM server select %s under Remote Permissions for\n"
+            "that port (Settings > Ports > Modify Port), or connect to a port that permits it."
+            % (r.port, r.host, c, c, PERMISSIONS[c]))
+    else:
+      print("RPC port %d on %s does not permit %s. On the RPM server, select %s under\n"
+            "Remote Permissions for that port (Settings > Ports > Modify Port), or connect to a port\n"
+            "that permits it." % (r.port, r.host, c, PERMISSIONS.get(c, 'the permission for it')))
+  if missing:
+    sys.exit(1)
+
+
+def finish(result):
+  """Print the server's reply and exit: 0 if it succeeded, else 1."""
+  print(result)
+  sys.exit(0 if isinstance(result, dict) and result.get('success') else 1)
+
+
+def queue_id(r, name):
+  """The id of the queue called name, or exit with an explanation."""
+  require(r, 'queue-list-names')
+  names = r.queue_list_names()
+  if not (isinstance(names, dict) and names.get('success')):
+    finish(names)
+  # the reply maps each queue id to its name, beside "success" and "command"
+  for qid, qname in names.items():
+    if qid.isdigit() and qname == name:
+      return int(qid)
+  print("Queue name not found.")
+  sys.exit(1)
